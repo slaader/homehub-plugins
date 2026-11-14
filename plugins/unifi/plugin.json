@@ -1,0 +1,7 @@
+{
+ "id": "unifi",
+ "version": "1.0.0",
+ "title": "UniFi Network API",
+ "core": ">=2.0.0 <3.0.0",
+ "dataEpoch": 1
+}
