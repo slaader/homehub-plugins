@@ -6,4 +6,6 @@ No household names, network addresses, home paths, credentials or private histor
 
 Run the complete npm test suite before committing. Tests must pass with no skips and no actual network except local fake servers. Every file is scanned with core's leak rules. Changes to the UniFi transport require fake-gateway tests proving no credentials reach an untrusted certificate and all calls are GET.
 
+Current suite: 23 tests in 5 files, all passing with no skips against core 2.0. For a combined run with other plugin sources, pass one `--site` fixture that configures every loaded source. Core loads all supplied sources in each run; this repository's minimal fixture intentionally cannot configure another source's required plugins.
+
 Use neutral git identity Home Hub <dev@home-hub.invalid>. Releases are annotated version tags after verification. Do not publish a household source or copy its history here.

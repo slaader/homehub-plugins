@@ -24,4 +24,13 @@ npm test
 
 Tests use a fake HTTPS gateway and dummy keys; no real router or household data is needed. The test run also scans every source, test, fixture and document for household details using the linked core's rules.
 
+When testing several plugin sources together, provide a shared fixture with the required settings for all of them:
+
+```sh
+node <core>/scripts/run-tests.mjs --plugins <this-source> --plugins <another-source> --site <shared-fixture.json>
+```
+
+Core loads every supplied source for each test run. Without `--site`, each run uses its own source's fixture;
+this source's minimal fixture cannot satisfy configuration requirements imposed by unrelated plugins.
+
 Versioned plugin sources are updated together with core using the core update command. Keep household plugins in a separate private source; do not copy private deployment scripts, configuration or history into this repository.
