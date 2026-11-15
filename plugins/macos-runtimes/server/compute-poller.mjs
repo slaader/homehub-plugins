@@ -6,6 +6,7 @@ export function createComputePoller({bridges={},store,intervalMs=60000,now=Date.
   if(!request){latest[host]={...(latest[host]||{}),bridge:'not-configured',checkedAt:new Date(now()).toISOString()};return;}
   try{
    const snapshot=normalizeSnapshot(await request('/compute/snapshot','GET'),now(),hosts);
+   if(snapshot.hostId!==host)throw new Error('wrong-device');
    latest[host]={snapshot,bridge:'connected',checkedAt:new Date(now()).toISOString()};await store.saveLatest(host,snapshot);
    if(snapshotsOnly.has(host))return;
    let cursor=await store.getCursor(host);
@@ -22,7 +23,8 @@ export function createComputePoller({bridges={},store,intervalMs=60000,now=Date.
  }
  function poll(){if(!enabled())return Promise.resolve();if(!running)running=Promise.all(devices.map(pollHost)).finally(()=>{running=null;});return running;}
  async function start(){
-  for(const host of devices){const snapshot=await store.loadLatest(host);if(snapshot)latest[host]={snapshot,bridge:'unknown',checkedAt:null};}
+  for(const host of devices){const snapshot=await store.loadLatest(host);if(snapshot)if(snapshot.hostId!==host)throw new Error('wrong-device');
+   latest[host]={snapshot,bridge:'unknown',checkedAt:null};}
   await poll();timer=setInterval(poll,intervalMs);timer.unref?.();
  }
  return {start,stop:()=>clearInterval(timer),poll,latest:()=>latest,snapshotOnly:()=>[...snapshotsOnly]};

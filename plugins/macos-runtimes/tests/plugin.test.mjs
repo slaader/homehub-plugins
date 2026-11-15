@@ -1,0 +1,60 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {hub,validateSite} from 'home-hub/testing';
+import plugin,{runtimeStatus} from '../index.mjs';
+import {readComputeConfig} from '../server/config.mjs';
+import {createComputePoller} from '../server/compute-poller.mjs';
+const requestId='00000000-0000-0000-0000-000000000001';
+const devices=[{id:'mac',name:'Example Mac',ip:'10.0.0.20'}];
+const section={sockets:{mac:'/tmp/example/bridge.sock'},hosts:{mac:{actions:[]}},controls:{mac:[{id:'runtime',label:'com.example.runtime',name:'Runtime',impact:'Stops runtime'}]}};
+test('HTTP reads, control scopes, write permission and Origin are enforced before bridge calls',async t=>{
+ const calls=[],at=new Date().toISOString();let offline=false;
+ const client=async(route,method,input)=>{calls.push({route,method,input});if(offline)throw new Error('offline');
+  if(route==='/compute/snapshot')return {hostId:'mac',collectedAt:at,services:[]};
+  if(route==='/compute/records')return {items:[],cursor:0};
+  return {observedAt:at,services:[{id:'runtime',state:'running',pid:123,secret:'PRIVATE_TEST_VALUE'},{id:'unlisted',state:'running'}],extra:'PRIVATE_TEST_VALUE'};
+ };
+ const h=await hub(t,{plugins:[plugin],site:validateSite({devices,plugins:{'macos-runtimes':section}}),macosRuntimes:{mac:client}});
+ const reader=await h.account('reader',[]),other=await h.account('other',['tickets:write']),writer=await h.account('controller',['macos-runtimes:control']);
+ const body={host:'mac',id:'runtime',action:'stop',requestId};
+ assert.equal((await fetch(h.origin+'/api/macos-runtimes')).status,401);
+ assert.equal((await fetch(h.origin+'/api/macos-runtimes',{headers:reader.headers})).status,200);
+ for(const headers of [reader.headers,other.headers])for(const route of ['/api/macos-runtimes/action','/api/macos-runtimes/controls/action'])assert.equal((await h.post(route,body,headers)).status,403);
+ assert.equal((await h.post('/api/macos-runtimes/controls/action',body,{...h.admin,Origin:'https://other.example.lan'})).status,403);
+ assert.equal(calls.length,0);
+ assert.equal((await h.post('/api/macos-runtimes/action',{host:'mac',action:'unload-all',requestId},writer.headers)).status,400);
+ assert.equal((await h.post('/api/macos-runtimes/controls/action',{...body,id:'unlisted'},writer.headers)).status,400);
+ assert.equal(calls.length,0);
+ const response=await h.post('/api/macos-runtimes/controls/action',body,writer.headers);assert.equal(response.status,200);
+ assert.deepEqual(calls,[{route:'/controls/action',method:'POST',input:{id:'runtime',action:'stop',requestId}}]);
+ const result=await response.json();assert.equal(result.services.length,1);assert.ok(!JSON.stringify(result).includes('PRIVATE_TEST_VALUE'));
+ const read=await fetch(h.origin+'/api/macos-runtimes/controls',{headers:reader.headers});assert.equal(read.status,200);assert.ok(!JSON.stringify(await read.json()).includes('PRIVATE_TEST_VALUE'));
+ offline=true;const check=await (await h.post('/api/admin/integrations/test',{id:'macos-runtimes.bridges'},h.admin)).json();assert.equal(check.result.state,'error');
+ assert.equal((await h.post('/api/admin/integrations/toggle',{id:'macos-runtimes.bridges',enabled:false},h.admin)).status,200);
+ const before=calls.length;
+ assert.equal((await h.post('/api/macos-runtimes/controls/action',body,writer.headers)).status,409);
+ const disabled=await (await fetch(h.origin+'/api/macos-runtimes/controls',{headers:reader.headers})).json();assert.equal(disabled.disabled.id,'macos-runtimes.bridges');
+ assert.deepEqual(plugin.provides['home.runtimes'](h.handler.hub.state('macos-runtimes'),h.handler.hub),{});assert.equal(calls.length,before);
+});
+test('integration status has Czech source templates and English entries and reports partial failure',()=>{
+ const config=readComputeConfig(section,{devices}),latest={mac:{bridge:'connected',snapshot:{collectedAt:new Date().toISOString()}}};
+ const state={config,poller:{latest:()=>latest}};
+ const status=runtimeStatus(state,{});assert.equal(status.state,'ok');assert.equal(plugin.strings.en[status.summary.parts[0].key],'Connected to {connected} of {total} bridges.');
+ latest.mac.bridge='unavailable';assert.equal(runtimeStatus(state,{}).state,'error');
+ latest.mac.bridge='connected';latest.mac.snapshot.collectedAt='2020-01-01T00:00:00Z';assert.equal(runtimeStatus(state,{}).state,'stale');
+ assert.equal(runtimeStatus({config:null},{}).state,'not-configured');assert.equal(runtimeStatus(state,{}, {enabled:false}).state,'disabled');
+ for(const field of [plugin.scopes['macos-runtimes:control'].label,plugin.scopes['macos-runtimes:control'].desc,plugin.integrations[0].description,plugin.integrations[0].howTo])assert.ok(plugin.strings.en[field]);
+});
+test('a socket reporting a different configured device cannot be persisted under the wrong device',async()=>{
+ let writes=0;const hosts=[{id:'mac',hardware:{}},{id:'other',hardware:{}}];
+ const store={saveLatest:async()=>writes++};
+ const poller=createComputePoller({hosts,devices:['mac'],store,bridges:{mac:async()=>({hostId:'other',collectedAt:new Date().toISOString()})}});
+ await poller.poll();assert.equal(writes,0);assert.equal(poller.latest().mac.bridge,'unavailable');
+});
+
+test('model action responses must name the device that received the action',async()=>{
+ const route=plugin.routes.find(r=>r.path==='/api/macos-runtimes/action');
+ const config={hosts:[{id:'mac',hardware:{}},{id:'other',hardware:{}}]};
+ const context={input:{host:'mac',action:'unload-all',requestId},state:{config,clients:{mac:async()=>({snapshot:{hostId:'other'}})},poller:{poll:async()=>{}}},hub:{integrationEnabled:()=>true},json:()=>assert.fail('wrong-device response escaped')};
+ await assert.rejects(route.handler(context),/unavailable/);
+});
