@@ -1,6 +1,6 @@
 # Home Hub plugins
 
-Generic plugins for Home Hub 2.0, with no household configuration or third-party dependencies.
+Generic plugins for Home Hub, with no household configuration or third-party dependencies.
 
 ## Included
 
@@ -8,7 +8,7 @@ Generic plugins for Home Hub 2.0, with no household configuration or third-party
 
 ## Connect a source
 
-Use Node 22 or newer and a Home Hub 2.0 checkout. Add this source to `HOME_HUB_HOME/instance.json` under `sources.plugins` (see core `docs/storage.md`), or set `HOME_HUB_PLUGINS_DIR` to this source's `plugins` directory. Link the core package:
+Use Node 22 or newer and a Home Hub 1.0 checkout. Add this source to `HOME_HUB_HOME/instance.json` under `sources.plugins` (see core `docs/storage.md`), or set `HOME_HUB_PLUGINS_DIR` to this source's `plugins` directory. Link the core package:
 
 ```sh
 node <core>/scripts/plugins.mjs link --plugins <this-source>/plugins

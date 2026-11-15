@@ -5,5 +5,5 @@
   "type": "module",
   "description": "Generic plugins for Home Hub",
   "scripts": {"test": "node tests/run.mjs"},
-  "homeHub": {"core": ">=2.0.0 <3.0.0", "updates": {"type": "git"}}
+  "homeHub": {"core": ">=1.0.0 <2.0.0", "updates": {"type": "git"}}
 }
