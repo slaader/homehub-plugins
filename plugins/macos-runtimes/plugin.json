@@ -1,0 +1,1 @@
+{"id":"macos-runtimes","title":"macOS runtimes","version":"1.0.0","core":">=1.0.0 <2.0.0","dataEpoch":1,"hostAgents":[{"id":"bridge","title":"macOS runtime bridge","entry":"scripts/bridge.mjs","service":"launchd-agent","health":{"socket":"private/bridge.sock","get":"/compute/snapshot"},"config":"server/bridge-config.mjs"}]}

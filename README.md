@@ -6,6 +6,8 @@ Generic plugins for Home Hub, with no household configuration or third-party dep
 
 - **UniFi Network** (`unifi`): pulls network clients and hardware through the gateway API. Nothing is installed on the router. See [setup and credential handling](plugins/unifi/README.md).
 
+- **macOS runtimes** (`macos-runtimes`): local model runtimes, request history and bridge controls. See [setup](plugins/macos-runtimes/README.md).
+
 ## Connect a source
 
 Use Node 22 or newer and a Home Hub 1.0 checkout. Add this source to `HOME_HUB_HOME/instance.json` under `sources.plugins` (see core `docs/storage.md`), or set `HOME_HUB_PLUGINS_DIR` to this source's `plugins` directory. Link the core package:
