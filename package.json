@@ -2,6 +2,7 @@
   "name": "home-hub-public-plugins",
   "version": "1.0.0",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "description": "Generic plugins for Home Hub",
   "scripts": {"test": "node tests/run.mjs"},

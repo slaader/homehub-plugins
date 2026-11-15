@@ -1,6 +1,6 @@
 # Home Hub plugins
 
-Generic plugins for Home Hub, with no household configuration or third-party dependencies.
+Generic plugins for [Home Hub](https://github.com/slaader/homehub-core), with no household configuration or third-party dependencies.
 
 ## Included
 
@@ -36,3 +36,7 @@ Core loads every supplied source for each test run. Without `--site`, each run u
 this source's minimal fixture cannot satisfy configuration requirements imposed by unrelated plugins.
 
 Versioned plugin sources are updated together with core using the core update command. Keep household plugins in a separate private source; do not copy private deployment scripts, configuration or history into this repository.
+
+## Licence
+
+MIT, see [LICENSE](LICENSE).
