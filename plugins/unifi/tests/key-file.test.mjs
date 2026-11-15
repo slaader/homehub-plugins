@@ -1,0 +1,22 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {mkdtemp,rm,mkdir,writeFile,symlink} from 'node:fs/promises';
+import {execFileSync} from 'node:child_process';
+import os from 'node:os';
+import path from 'node:path';
+import {loadKey} from '../server/adapter.mjs';
+test('key reads refuse symlink escapes, non-files and oversized files before reading',async t=>{
+ const dir=await mkdtemp(path.join(os.tmpdir(),'unifi-key-'));t.after(()=>rm(dir,{recursive:true,force:true}));
+ const privateDirectory=path.join(dir,'private');await mkdir(privateDirectory);
+ const outside=path.join(dir,'outside');await mkdir(outside);await writeFile(path.join(outside,'key'),'TestKey',{mode:0o600});
+ await symlink(path.join(outside,'key'),path.join(privateDirectory,'leaf'));
+ await symlink(outside,path.join(privateDirectory,'parent'));
+ const read=keyFile=>()=>loadKey({keyFile,privateDirectory});
+ for(const keyFile of ['leaf','parent/key','.'])assert.throws(read(keyFile),e=>e.code==='key-permissions'||e.code==='key-missing');
+ await writeFile(path.join(privateDirectory,'huge'),'x'.repeat(1025),{mode:0o600});
+ assert.throws(read('huge'),e=>e.code==='key-invalid');
+ await writeFile(path.join(privateDirectory,'valid'),'x'.repeat(512)+'\n',{mode:0o600});assert.equal(read('valid')().key.length,512);
+ execFileSync('/usr/bin/mkfifo',[path.join(privateDirectory,'pipe')]);
+ assert.throws(read('pipe'),e=>e.code==='key-permissions');
+ assert.throws(()=>loadKey({keyFile:'valid',privateDirectory,uid:process.getuid()+1}),e=>e.code==='key-permissions');
+});

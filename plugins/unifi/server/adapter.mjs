@@ -11,7 +11,7 @@
 // The API key comes from the Integrations page's write-only field, else from keyFile in the private directory (0600,
 // owned by the hub's user). It is sent only on a socket whose certificate passed (server/client.mjs), and it never
 // appears in an observation, a status, a log line or an error.
-import {readFileSync,statSync} from 'node:fs';
+import {readFileSync,openSync,closeSync,fstatSync,readSync,realpathSync,constants} from 'node:fs';
 import {mkdir,writeFile,rename} from 'node:fs/promises';
 import path from 'node:path';
 import {getJson,UnifiError} from './client.mjs';
@@ -31,11 +31,22 @@ export function loadKey({secret,keyFile,privateDirectory,uid=process.getuid?.()}
  if(!keyFile)throw new UnifiError('key-missing');
  const file=path.resolve(privateDirectory,keyFile);
  if(!file.startsWith(path.resolve(privateDirectory)+path.sep))throw new UnifiError('key-missing');
- let info,key;
- try{info=statSync(file);key=readFileSync(file,'utf8').trim();}catch{throw new UnifiError('key-missing');}
- if(!info.isFile()||(info.mode&0o077)||(uid!==undefined&&info.uid!==uid))throw new UnifiError('key-permissions');
- if(!KEY.test(key))throw new UnifiError('key-invalid');
- return {key,from:'file'};
+ let fd;
+ try{
+  const root=realpathSync(privateDirectory),parent=realpathSync(path.dirname(file));
+  if(parent!==root&&!parent.startsWith(root+path.sep))throw new UnifiError('key-permissions');
+  // Never follow a leaf symlink or block opening a FIFO. Check the opened inode before reading it.
+  fd=openSync(file,constants.O_RDONLY|constants.O_NOFOLLOW|constants.O_NONBLOCK);
+  const info=fstatSync(fd);
+  if(!info.isFile()||(info.mode&0o077)||(uid!==undefined&&info.uid!==uid))throw new UnifiError('key-permissions');
+  if(info.size>1024)throw new UnifiError('key-invalid');
+  const bytes=Buffer.alloc(1025),size=readSync(fd,bytes,0,bytes.length,0);
+  if(size>1024)throw new UnifiError('key-invalid');
+  const key=bytes.subarray(0,size).toString('utf8').trim();
+  if(!KEY.test(key))throw new UnifiError('key-invalid');
+  return {key,from:'file'};
+ }catch(e){throw e instanceof UnifiError?e:new UnifiError(e.code==='ELOOP'?'key-permissions':'key-missing');}
+ finally{if(fd!==undefined)closeSync(fd);}
 }
 
 // Every page of a list, up to max items: offset/limit until a short page, the total, or the page budget.

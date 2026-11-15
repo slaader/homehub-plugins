@@ -69,7 +69,7 @@ Core validates and bounds all of it (`normalizeRouter`): at most 500 clients, 50
      (umask 077; read -rs KEY && printf '%s\n' "$KEY" > ~/home-hub/private/unifi/api-key)
      ```
 
-     The file must be mode 0600 and owned by the user the hub runs as; otherwise the pull fails with `key-permissions`.
+     The file must be a regular file, mode 0600 and owned by the user the hub runs as; otherwise the pull fails with `key-permissions`. Symlinks at the file and paths escaping the private directory are refused. Reads are capped at 1024 bytes (`key-invalid` above that limit); the key itself is at most 512 characters.
      The field on the Integrations page wins over the file when both are set.
 5. Restart the hub (the site file is read at start) and press **Test now** on the integration's card. The router tile
    and page fill within a minute.
