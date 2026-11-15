@@ -49,21 +49,23 @@ export function correlate(record,lines){
  if(best)best.used=true;return best;
 }
 export function watchAccessLog({base,flavor,onLine,delay=5000,get=http.get}){
- let stopped=false,request=null,timer=null;
+ let stopped=false,request=null,timer=null,headersTimer=null;
  const url=flavor==='v268'?`${base}/logs/stream/http?no-history`:`${base}/logs/stream/proxy`;
  function retry(){if(stopped)return;clearTimeout(timer);timer=setTimeout(connect,delay);}
  function connect(){
   if(stopped)return;const startedAt=Date.now();
   request=get(url,{headers:{'User-Agent':'home-hub-bridge/1'}},response=>{
-   if(response.statusCode!==200){response.resume();retry();return;}
+   clearTimeout(headersTimer);
+   if(response.statusCode!==200){response.destroy();request?.destroy();retry();return;}
    let buffer='';response.setEncoding('utf8');
    response.on('data',chunk=>{buffer+=chunk;if(buffer.length>65536)buffer=buffer.slice(-65536);let index;
     while((index=buffer.indexOf('\n'))>=0){const line=buffer.slice(0,index);buffer=buffer.slice(index+1);if(flavor!=='v268'&&Date.now()-startedAt<2000)continue;onLine(line);}});
    response.on('end',retry);response.on('error',retry);
   });
-  request.on('error',retry);
+  headersTimer=setTimeout(()=>request?.destroy(new Error('timeout')),8000);headersTimer.unref?.();
+  request.on('error',()=>{clearTimeout(headersTimer);retry();});
  }
- connect();return ()=>{stopped=true;clearTimeout(timer);request?.destroy();};
+ connect();return ()=>{stopped=true;clearTimeout(timer);clearTimeout(headersTimer);request?.destroy();};
 }
 async function run(file,args,timeout=5000){try{return (await exec(file,args,{timeout,maxBuffer:65536})).stdout;}catch{return '';}}
 
@@ -142,13 +144,14 @@ export function createComputeController({hostId,profile,fetcher=fetch,stateDirec
  if(!profile)throw new Error('invalid');
  const state={seq:0,queue:[],lastMetricAt:0,seenKeys:[],lines:[],lastRequest:new Map(),lastActivity:new Map(),previous:new Map(),warming:new Map(),config:{models:{}},sizes:new Map(),snapshot:null,builtAt:0};
  const seen=new Set();const file=path.join(stateDirectory,`compute-${hostId}.json`);
+ const remember=(map,key,value)=>{map.delete(key);map.set(key,value);if(map.size>2000)map.delete(map.keys().next().value);};
  const requests=new Map();let busy=false,building=null,stopWatch=null,timer=null;
  const get=(url,options)=>readJson(url,{...options,fetcher});
  async function load(){try{const saved=JSON.parse(await readFile(file,'utf8'));if(Number.isSafeInteger(saved.seq))state.seq=saved.seq;if(Number.isFinite(saved.lastMetricAt))state.lastMetricAt=saved.lastMetricAt;for(const key of Array.isArray(saved.seenKeys)?saved.seenKeys.slice(-2000):[])seen.add(key);state.queue=Array.isArray(saved.queue)?saved.queue.slice(-5000):[];}catch{}}
  async function save(){try{await mkdir(stateDirectory,{recursive:true,mode:0o700});const tmp=`${file}.${process.pid}.tmp`;await writeFile(tmp,JSON.stringify({seq:state.seq,lastMetricAt:state.lastMetricAt,seenKeys:[...seen].slice(-2000),queue:state.queue.slice(-5000)}),{mode:0o600});await rename(tmp,file);}catch{}}
  function enqueue(item){state.queue.push({seq:++state.seq,...item});if(state.queue.length>5000)state.queue.splice(0,state.queue.length-5000);}
  async function loadConfig(){if(!profile.llamaSwap)return;try{state.config=parseLlamaSwapConfig(await readConfig(profile.llamaSwap.configPath));}catch{state.config={models:{}};}
-  for(const [id,cfg] of Object.entries(state.config.models||{}))if(cfg.modelFile&&!state.sizes.has(id))try{state.sizes.set(id,await fileSize(cfg.modelFile));}catch{}}
+  for(const [id,cfg] of Object.entries(state.config.models||{}))if(cfg.modelFile&&!state.sizes.has(id))try{remember(state.sizes,id,await fileSize(cfg.modelFile));}catch{}}
  async function collectLlamaSwap(){
   const ls=profile.llamaSwap;if(!ls)return null;const observedAt=new Date(now()).toISOString();
   const service={id:'llama-swap',name:ls.name,description:ls.description,engine:ls.engine,url:ls.url,version:'',status:'unreachable',observedAt,memory:{},stats:{},pool:null,models:[]};
@@ -214,7 +217,7 @@ export function createComputeController({hostId,profile,fetcher=fetch,stateDirec
    const t=ls.flavor==='v268'?(m.tokens||{}):m,record={kind:'request',serviceId:'llama-swap',metricId:m.id,at:new Date(ts).toISOString(),model:m.model,path:ls.flavor==='v268'?classifyPath(m.req_path):'other',status:ls.flavor==='v268'?m.resp_status_code:null,inputTokens:t.input_tokens,outputTokens:t.output_tokens,cacheTokens:t.cache_tokens,promptTps:t.prompt_per_second,generationTps:t.tokens_per_second,durationMs:m.duration_ms};
    const line=correlate(record,state.lines);record.uaFamily=line?line.uaFamily:'';enqueue(record);
    seen.add(`${ts}:${m.id}`);if(ts>state.lastMetricAt)state.lastMetricAt=ts;
-   const end=ts+(m.duration_ms||0);state.lastRequest.set(m.model,Math.max(state.lastRequest.get(m.model)||0,end));state.lastActivity.set(m.model,Math.max(state.lastActivity.get(m.model)||0,end));
+   const end=ts+(m.duration_ms||0);remember(state.lastRequest,m.model,Math.max(state.lastRequest.get(m.model)||0,end));remember(state.lastActivity,m.model,Math.max(state.lastActivity.get(m.model)||0,end));
   }
   if(seen.size>4000)for(const key of [...seen].slice(0,seen.size-2000))seen.delete(key);
   const cutoff=now()-900000;state.lines=state.lines.filter(l=>!l.used&&l.arrivedAt>=cutoff).slice(-2000);
@@ -223,8 +226,8 @@ export function createComputeController({hostId,profile,fetcher=fetch,stateDirec
   for(const service of services){if(!service||!['llama-swap','mlx-serve'].includes(service.id))continue;
    for(const model of service.models){const key=`${service.id}:${model.id}`,before=state.previous.get(key);
     if(before!==model.state&&(model.state==='loaded'||(before==='loaded'&&model.state==='unloaded')))enqueue({kind:'event',serviceId:service.id,at:new Date(now()).toISOString(),model:model.id,state:model.state});
-    if(model.state==='loaded'&&before!=='loaded')state.lastActivity.set(model.id,Math.max(state.lastActivity.get(model.id)||0,now()));
-    state.previous.set(key,model.state);}}
+    if(model.state==='loaded'&&before!=='loaded')remember(state.lastActivity,model.id,Math.max(state.lastActivity.get(model.id)||0,now()));
+    remember(state.previous,key,model.state);}}
  }
  async function build(){
   if(building)return building;
@@ -261,7 +264,7 @@ export function createComputeController({hostId,profile,fetcher=fetch,stateDirec
     if(value.model&&!known.has(value.model))throw new Error('not-found');
     if(value.action==='unload-all')await readBody(`${ls.base}/unload`,{timeout:30000,fetcher});
     else if(value.action==='unload-model'){if(ls.flavor!=='v268')throw new Error('invalid');await readBody(`${ls.base}/api/models/unload/${encodeURIComponent(value.model)}`,{method:'POST',timeout:30000,fetcher});}
-    else if(value.action==='warm'){state.warming.set(value.model,now());state.lastActivity.set(value.model,now());readBody(`${ls.base}/upstream/${encodeURIComponent(value.model)}/health`,{timeout:900000,fetcher}).catch(()=>{});await new Promise(r=>setTimeout(r,1500));}
+    else if(value.action==='warm'){remember(state.warming,value.model,now());remember(state.lastActivity,value.model,now());readBody(`${ls.base}/upstream/${encodeURIComponent(value.model)}/health`,{timeout:900000,fetcher}).catch(()=>{});await new Promise(r=>setTimeout(r,1500));}
     else if(value.action==='unload-audio'){const packs=(state.snapshot?.services||[]).find(s=>s.id==='mlx-serve')?.models.filter(m=>m.state==='loaded')||[];for(const pack of packs)await readBody(`${profile.mlxServe.base}/v1/unload-model`,{method:'POST',timeout:30000,fetcher,headers:{'Content-Type':'application/json'},body:JSON.stringify({model:pack.id})});}
     outcome='accepted';state.builtAt=0;return {ok:true,snapshot:await snapshot()};
    }finally{

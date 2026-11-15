@@ -39,7 +39,7 @@ export function requestsReader(store,hosts=[]){
  return {id:'macos-runtimes-history',async read({from,to,limit=200000}={}){
   const out=[];
   for(const host of hosts){
-   for(const r of await store.readRecords(host,from,to)){
+   for(const r of await store.readRecords(host,from,to,{limit:Math.min(limit-out.length,200000)})){
     if(r.kind!=='request')continue;
     out.push({device:host,runtime:r.serviceId||'llama-swap',model:r.model,at:r.at,metricId:r.metricId,path:r.path,inputTokens:r.inputTokens,outputTokens:r.outputTokens,promptTps:r.promptTps,
      generationTps:r.generationTps,durationMs:r.durationMs,client:(c=>c==='Unattributed'?'':c)(r.requestor||requestorFor(r.uaFamily))});

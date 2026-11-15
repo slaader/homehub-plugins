@@ -1,5 +1,18 @@
 import {readFile,writeFile,rename,mkdir,readdir,appendFile,unlink} from 'node:fs/promises';
 import path from 'node:path';
+import {createReadStream} from 'node:fs';
+async function* historyLines(file){
+ let buffer='',discard=false;
+ for await(const chunk of createReadStream(file,{encoding:'utf8',highWaterMark:16384})){
+  const parts=chunk.split('\n');
+  for(let i=0;i<parts.length;i++){
+   if(buffer.length+parts[i].length>8192){buffer='';discard=true;}
+   if(!discard)buffer+=parts[i];
+   if(i<parts.length-1){if(!discard)yield buffer;buffer='';discard=false;}
+  }
+ }
+ if(buffer&&!discard)yield buffer;
+}
 export function freshness(timestamp,now=Date.now()){const age=now-Date.parse(timestamp);return !Number.isFinite(age)||age< -60000?'unknown':age>180000?'stale':'fresh';}
 import {controlAction,controlState} from './control-data.mjs';
 import {hostDefinition} from './config.mjs';
@@ -54,11 +67,11 @@ export function createComputeStore(stateDirectory,{retentionDays=400,hosts=[]}={
  const seen=new Map();
  async function readJson(file,fallback){try{return JSON.parse(await readFile(file,'utf8'));}catch{return fallback;}}
  async function writeJson(file,value){await mkdir(path.dirname(file),{recursive:true,mode:0o700});const tmp=`${file}.${process.pid}.tmp`;await writeFile(tmp,JSON.stringify(value),{mode:0o600});await rename(tmp,file);}
- async function readRecords(host,from,to){
+ async function readRecords(host,from,to,{limit=200000}={}){
   const out=[];let files;try{files=(await readdir(dir(host))).filter(f=>/^history-\d{4}-\d{2}\.jsonl$/.test(f)).sort();}catch{return out;}
   for(const f of files){
    const start=Date.parse(f.slice(8,15)+'-01T00:00:00Z');if(start>to||start<from-32*86400000)continue;
-   let n=0;for(const line of (await readFile(path.join(dir(host),f),'utf8')).split('\n')){if(!line||++n>300000)continue;let r;try{r=JSON.parse(line);}catch{continue;}const at=Date.parse(r.at);if(at>=from&&at<=to)out.push({...r,hostId:host});}
+   let n=0;for await(const line of historyLines(path.join(dir(host),f))){if(++n>300000)break;if(!line)continue;let r;try{r=JSON.parse(line);}catch{continue;}const at=Date.parse(r?.at);if(at>=from&&at<=to){out.push({...r,hostId:host});if(out.length>=limit)return out;}}
   }
   return out;
  }
