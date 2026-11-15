@@ -6,7 +6,7 @@ Minimal site section (the JSON key includes a hyphen):
 
 ```json
 {"plugins":{"macos-runtimes":{
-  "sockets":{"mac":"/tmp/example-runtime.sock"},
+  "sockets":{"mac":"/Users/alice/.local/share/home-hub-runtime/private/bridge.sock"},
   "hosts":{"mac":{"agent":{"omlx":{"base":"http://127.0.0.1:8000"},"actions":[]}}}
 }}}
 ```
@@ -22,7 +22,7 @@ node <core>/scripts/install-host-agent.mjs --plugin macos-runtimes --agent bridg
 node <core>/scripts/install-host-agent.mjs --plugin macos-runtimes --agent bridge --device mac
 ```
 
-Core installs the import closure, `config/bridge.json`, launchd user agent and `private/bridge.sock` under the configured target. Run as the runtime owner, never root. For a remote device relay that Unix socket through SSH to the configured hub socket; the plugin installs no tunnel. Restrict socket directories and SSH access to trusted users: socket access authorizes controls. The bridge socket is mode 0600 and has no TCP listener. Runtime APIs must be accessible locally without credentials; authenticated runtime transport is a follow-up. Never put credentials in site configuration or agent environment.
+Core installs the import closure, `config/bridge.json`, launchd user agent and `private/bridge.sock` under the configured target. Run as the runtime owner, never root. For a remote device relay that Unix socket through SSH to the configured hub socket; the plugin installs no tunnel. Restrict socket directories and SSH access to trusted users: socket access authorizes controls. The bridge requires an owner-only socket directory (0700), refuses unsafe ancestors or an existing live socket, sets the socket to 0600 and has no TCP listener. Do not put it directly in a shared directory such as /tmp. Runtime APIs must be accessible locally without credentials; authenticated runtime transport is a follow-up. Never put credentials in site configuration or agent environment.
 
 Hub state lives under its plugin data directory (epoch 1); bridge queue and action audit live under the installed agent's data directory. One hub must own a bridge's history cursor. Use a separate bridge instance when two hubs need independent history.
 
