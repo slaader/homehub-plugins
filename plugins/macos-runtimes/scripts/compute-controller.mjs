@@ -4,7 +4,7 @@ import path from 'node:path';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {mkdir,readFile,writeFile,rename,appendFile,stat,readdir} from 'node:fs/promises';
-import {classifyPath,uaFamilyOf,computeAction} from '../server/compute-data.mjs';
+import {classifyPath,uaFamilyOf,computeAction,normalizeRecord} from '../server/compute-data.mjs';
 const exec=promisify(execFile);
 export async function readBody(url,{timeout=8000,method='GET',body,headers={},max=2*1024*1024,fetcher=fetch}={}){
  const response=await fetcher(url,{method,body,headers:{'User-Agent':'home-hub-bridge/1',...headers},redirect:'error',signal:AbortSignal.timeout(timeout)});
@@ -212,12 +212,14 @@ export function createComputeController({hostId,profile,fetcher=fetch,stateDirec
  async function pollMetrics(){
   const ls=profile.llamaSwap;if(!ls)return;let raw;try{raw=ls.flavor==='v268'?(await get(`${ls.base}/api/metrics/activity`)).data:await get(`${ls.base}/api/metrics`);}catch{return;}
   if(!Array.isArray(raw))return;
-  const fresh=raw.map(m=>({m,ts:Date.parse(m?.timestamp)})).filter(({m,ts})=>Number.isFinite(ts)&&typeof m.model==='string'&&ts>=state.lastMetricAt-3600000&&!seen.has(`${ts}:${m.id}`)).sort((a,b)=>a.ts-b.ts||a.m.id-b.m.id);
+  const fresh=raw.map(m=>({m,ts:Date.parse(m?.timestamp)})).filter(({m,ts})=>Number.isFinite(ts)&&ts<=now()+300000&&typeof m.model==='string'&&m.model.length<=120&&Number.isSafeInteger(m.id)&&m.id>=0&&ts>=state.lastMetricAt-3600000&&!seen.has(`${ts}:${m.id}`)).sort((a,b)=>a.ts-b.ts||a.m.id-b.m.id);
   for(const {m,ts} of fresh){
    const t=ls.flavor==='v268'?(m.tokens||{}):m,record={kind:'request',serviceId:'llama-swap',metricId:m.id,at:new Date(ts).toISOString(),model:m.model,path:ls.flavor==='v268'?classifyPath(m.req_path):'other',status:ls.flavor==='v268'?m.resp_status_code:null,inputTokens:t.input_tokens,outputTokens:t.output_tokens,cacheTokens:t.cache_tokens,promptTps:t.prompt_per_second,generationTps:t.tokens_per_second,durationMs:m.duration_ms};
+   // A runtime's JSON is untrusted: queue only the protocol's bounded scalar fields.
+   const normalized=normalizeRecord(record);for(const key of Object.keys(record))record[key]=normalized[key];
    const line=correlate(record,state.lines);record.uaFamily=line?line.uaFamily:'';enqueue(record);
    seen.add(`${ts}:${m.id}`);if(ts>state.lastMetricAt)state.lastMetricAt=ts;
-   const end=ts+(m.duration_ms||0);remember(state.lastRequest,m.model,Math.max(state.lastRequest.get(m.model)||0,end));remember(state.lastActivity,m.model,Math.max(state.lastActivity.get(m.model)||0,end));
+   const end=ts+(record.durationMs||0);remember(state.lastRequest,m.model,Math.max(state.lastRequest.get(m.model)||0,end));remember(state.lastActivity,m.model,Math.max(state.lastActivity.get(m.model)||0,end));
   }
   if(seen.size>4000)for(const key of [...seen].slice(0,seen.size-2000))seen.delete(key);
   const cutoff=now()-900000;state.lines=state.lines.filter(l=>!l.used&&l.arrivedAt>=cutoff).slice(-2000);

@@ -51,3 +51,15 @@ test('runtime HTTP reads reject redirects, oversize bodies and runtime errors',a
  await assert.rejects(readBody('http://127.0.0.1:8000/test',{fetcher:async()=>new Response('PRIVATE_TEST_VALUE',{status:500})}),/^Error: http-500$/);
  assert.equal(options[0].redirect,'error');assert.ok(options[0].signal instanceof AbortSignal);
 });
+
+test('malformed metrics cannot retain arbitrary objects or oversized keys in the queue',async t=>{
+ const dir=await directory(t),at=new Date().toISOString();
+ const metrics=[{id:1,timestamp:at,model:'example-model',input_tokens:{secret:'PRIVATE_TEST_VALUE'},duration_ms:'999999999999999999'},
+  {id:2,timestamp:at,model:'x'.repeat(10000)}, {id:{secret:'PRIVATE_TEST_VALUE'},timestamp:at,model:'example-model'},
+  {id:3,timestamp:'2099-01-01T00:00:00Z',model:'example-model'}];
+ const controller=createComputeController({hostId:'mac',stateDirectory:dir,profile:{actions:[],llamaSwap:{base:'http://127.0.0.1:8000',configPath:'/tmp/example.yaml'}},facts:async()=>({}),readConfig:async()=>'',fetcher:async url=>new Response(JSON.stringify(url.endsWith('/api/metrics')?metrics:url.endsWith('/v1/models')?{data:[]}:{running:[]}))});
+ await controller.build();assert.equal(controller.state.queue.length,1);
+ assert.equal(controller.state.queue[0].inputTokens,null);assert.equal(controller.state.queue[0].durationMs,null);
+ assert.ok(!JSON.stringify(controller.state.queue).includes('PRIVATE_TEST_VALUE'));
+ assert.ok(Number.isFinite(controller.state.lastRequest.get('example-model')));
+});

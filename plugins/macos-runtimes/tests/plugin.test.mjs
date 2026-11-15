@@ -58,3 +58,11 @@ test('model action responses must name the device that received the action',asyn
  const context={input:{host:'mac',action:'unload-all',requestId},state:{config,clients:{mac:async()=>({snapshot:{hostId:'other'}})},poller:{poll:async()=>{}}},hub:{integrationEnabled:()=>true},json:()=>assert.fail('wrong-device response escaped')};
  await assert.rejects(route.handler(context),/unavailable/);
 });
+
+test('poller startup tolerates an empty cache and ignores a cached snapshot of another device',async()=>{
+ for(const snapshot of [null,{hostId:'other',collectedAt:new Date().toISOString()}]){
+  const poller=createComputePoller({hosts:[{id:'mac',hardware:{}}],store:{loadLatest:async()=>snapshot},bridges:{mac:async()=>{throw new Error('offline');}}});
+  try{await poller.start();assert.equal(poller.latest().mac.bridge,'unavailable');assert.equal(poller.latest().mac.snapshot,undefined);}
+  finally{poller.stop();}
+ }
+});

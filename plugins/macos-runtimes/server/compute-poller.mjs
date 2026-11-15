@@ -23,8 +23,7 @@ export function createComputePoller({bridges={},store,intervalMs=60000,now=Date.
  }
  function poll(){if(!enabled())return Promise.resolve();if(!running)running=Promise.all(devices.map(pollHost)).finally(()=>{running=null;});return running;}
  async function start(){
-  for(const host of devices){const snapshot=await store.loadLatest(host);if(snapshot)if(snapshot.hostId!==host)throw new Error('wrong-device');
-   latest[host]={snapshot,bridge:'unknown',checkedAt:null};}
+  for(const host of devices){const snapshot=await store.loadLatest(host);if(snapshot?.hostId===host)latest[host]={snapshot,bridge:'unknown',checkedAt:null};}
   await poll();timer=setInterval(poll,intervalMs);timer.unref?.();
  }
  return {start,stop:()=>clearInterval(timer),poll,latest:()=>latest,snapshotOnly:()=>[...snapshotsOnly]};
