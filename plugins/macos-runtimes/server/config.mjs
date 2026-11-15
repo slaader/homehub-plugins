@@ -7,11 +7,12 @@ const PATTERN_LIMIT=200;
 const plain=v=>v&&typeof v==='object'&&!Array.isArray(v);
 const fail=message=>{throw new Error(`site config: plugins.macos-runtimes.${message}`);};
 const keys=(v,allowed,where)=>{if(!plain(v))fail(`${where} must be an object`);const extra=Object.keys(v).filter(k=>!allowed.includes(k));if(extra.length)fail(`${where} has unknown field(s): ${extra.join(', ')}`);return v;};
+const entries=(v,where)=>{if(!plain(v))fail(`${where} must be an object`);return Object.entries(v);};
 const text=(v,max,where,{empty=false}={})=>{if(typeof v!=='string'||v.length>max||/[\u0000-\u001f\u007f]/.test(v)||(!empty&&!v.trim()))fail(`${where} must be a text of ${empty?0:1} to ${max} characters`);return v;};
 const count=(v,where)=>{if(!Number.isSafeInteger(v)||v<0)fail(`${where} must be a whole number of 0 or more`);return v;};
 const oneOfList=(v,allowed,where)=>{if(!Array.isArray(v)||v.some(x=>!allowed.includes(x))||new Set(v).size!==v.length)fail(`${where} must be a list of ${allowed.join(', ')}`);return Object.freeze([...v]);};
-const base=(v,where)=>{if(typeof v!=='string'||(!LOOPBACK.test(v)||Number(v.split(':').at(-1))>65535))fail(`${where} must be a loopback origin such as http://127.0.0.1:8000`);return v;};
-const pageUrl=(v,where)=>{if(typeof v!=='string'||!LOOPBACK_URL.test(v))fail(`${where} must be a loopback address such as http://127.0.0.1:8000/`);return v;};
+const base=(v,where)=>{if(typeof v!=='string'||(!LOOPBACK.test(v)||Number(v.split(':').at(-1))<1||Number(v.split(':').at(-1))>65535))fail(`${where} must be a loopback origin such as http://127.0.0.1:8000`);return v;};
+const pageUrl=(v,where)=>{if(typeof v!=='string'||(!LOOPBACK_URL.test(v)||Number(/:(\d+)(?:\/|$)/.exec(v)?.[1])<1||Number(/:(\d+)(?:\/|$)/.exec(v)?.[1])>65535))fail(`${where} must be a loopback address such as http://127.0.0.1:8000/`);return v;};
 
 const KINDS={
  llamaSwap:{name:'llama-swap',engine:'llama.cpp server (GGUF)',fields:['base','name','engine','url','description','flavor','configPath']},
@@ -48,7 +49,7 @@ function agent(raw,where){
  if(raw.jobs!==undefined&&raw.jobs!==null){keys(raw.jobs,['name','engine','description','toolDir'],`${where}.jobs`);
   if(typeof raw.jobs.toolDir!=='string'||!/^[A-Za-z0-9._][A-Za-z0-9._/-]{0,199}$/.test(raw.jobs.toolDir)||raw.jobs.toolDir.split('/').includes('..'))fail(`${where}.jobs.toolDir must be a directory under the home directory, such as .local/share/uv/tools/mflux`);
   out.jobs={name:raw.jobs.name===undefined?'mflux':text(raw.jobs.name,60,`${where}.jobs.name`),engine:raw.jobs.engine===undefined?'MLX · CLI':text(raw.jobs.engine,120,`${where}.jobs.engine`),
-   description:raw.jobs.description===undefined?'':text(raw.jobs.description,300,`${where}.jobs.description`),toolDir:raw.jobs.toolDir};}
+   description:raw.jobs.description===undefined?'':text(raw.jobs.description,300,`${where}.jobs.description`,{empty:true}),toolDir:raw.jobs.toolDir};}
  // A runtime's processes, by a pattern on the command line: a string here, compiled by the bridge (patternsOf).
  if(raw.pids!==undefined){if(!plain(raw.pids))fail(`${where}.pids must be an object: {"<service id>": "<pattern>"}`);
   out.pids={};for(const [id,source] of Object.entries(raw.pids)){if(!SERVICE_IDS.includes(id))fail(`${where}.pids names "${id}", which is not a runtime (${SERVICE_IDS.join(', ')})`);
@@ -86,7 +87,7 @@ function page(raw,byId,where){
  const addresses=raw.knownAddresses??[];
  if(!Array.isArray(addresses)||addresses.length>32||addresses.some(a=>typeof a!=='string'||!IPV4.test(a)))fail(`${where}.knownAddresses must be a list of at most 32 IPv4 addresses`);
  const links={};
- for(const [id,list] of Object.entries(raw.links===undefined?{}:keys(raw.links,Object.keys(raw.links),`${where}.links`))){
+ for(const [id,list] of entries(raw.links===undefined?{}:raw.links,`${where}.links`)){
   if(!byId.has(id))fail(`${where}.links names "${id}", which is not a device of this site (devices[])`);
   if(!Array.isArray(list)||list.length>8)fail(`${where}.links.${id} must be a list of at most 8 links`);
   links[id]=list.map((l,i)=>{const at=`${where}.links.${id}[${i}]`;keys(l,['label','url'],at);let u;try{u=new URL(l.url);}catch{fail(`${at}.url must be an http(s) address`);}
@@ -101,35 +102,34 @@ export function readComputeConfig(raw,{devices=[]}={}){
  if(raw===undefined)return null;
  keys(raw,['$comment','hosts','controls','page','sockets','agents'],'(the section)');
  const r=raw??{},byId=new Map(devices.map(m=>[m.id,m]));
- // The devices with a bridge: the ones bridges names, in slot order (memory, studio, miniServer).
+ // Bridge devices are keyed by the site's device IDs.
  if(r.agents!==undefined){
   keys(r.agents,['bridge'],'agents');
-  const entries=r.agents.bridge??{};keys(entries,Object.keys(entries),'agents.bridge');
-  for(const [id,v] of Object.entries(entries)){
+  for(const [id,v] of entries(r.agents.bridge===undefined?{}:r.agents.bridge,'agents.bridge')){
    if(!byId.has(id))fail(`agents.bridge.${id} must name a device`);
    keys(v,['target','label','node','env','logs'],`agents.bridge.${id}`);
    for(const field of ['target','node','logs'])if(v[field]!==undefined&&(typeof v[field]!=='string'||!v[field]||/[\x00-\x1f]/.test(v[field])))fail(`agents.bridge.${id}.${field} must be a path`);
-   if(v.label!==undefined&&!LABEL.test(v.label))fail(`agents.bridge.${id}.label must be a launchd label`);
-   if(v.env!==undefined){keys(v.env,Object.keys(v.env),`agents.bridge.${id}.env`);for(const [k,x] of Object.entries(v.env))if(!/^[A-Z_][A-Z0-9_]*$/.test(k)||typeof x!=='string'||/[\x00-\x1f]/.test(x))fail(`agents.bridge.${id}.env.${k} must be text`);}
+   if(v.label!==undefined&&(typeof v.label!=='string'||!LABEL.test(v.label)))fail(`agents.bridge.${id}.label must be a launchd label`);
+   if(v.env!==undefined){for(const [k,x] of entries(v.env,`agents.bridge.${id}.env`))if(!/^[A-Z_][A-Z0-9_]*$/.test(k)||typeof x!=='string'||/[\x00-\x1f]/.test(x))fail(`agents.bridge.${id}.env.${k} must be text`);}
   }
  }
- const sockets=r.sockets??{};keys(sockets,Object.keys(sockets),'sockets');
- for(const [id,socket] of Object.entries(sockets)){
+ const sockets=r.sockets===undefined?{}:r.sockets;
+ for(const [id,socket] of entries(sockets,'sockets')){
   if(!byId.has(id))fail(`sockets.${id} must name a device`);
   if(typeof socket!=='string'||!socket.startsWith('/')||socket.length>100||/[\x00-\x1f]/.test(socket)||socket.split('/').includes('..'))fail(`sockets.${id} must be an absolute Unix socket path`);
  }
  const bridgeDevices=Object.keys(sockets),bridges={};
 
- const hosts=Object.entries(r.hosts===undefined?{}:keys(r.hosts,Object.keys(r.hosts),'hosts')).map(([id,h])=>{if(!DEVICE.test(id))fail(`hosts names "${id}", which is not a device id`);return host(id,h,byId.get(id),`hosts.${id}`,bridgeDevices);});
+ const hosts=entries(r.hosts===undefined?{}:r.hosts,'hosts').map(([id,h])=>{if(!DEVICE.test(id))fail(`hosts names "${id}", which is not a device id`);return host(id,h,byId.get(id),`hosts.${id}`,bridgeDevices);});
  for(const id of bridgeDevices)if(!hosts.some(h=>h.id===id))fail(`sockets.${id} needs hosts.${id}`);
  const controls={};
- for(const [id,list] of Object.entries(r.controls===undefined?{}:keys(r.controls,Object.keys(r.controls),'controls'))){
+ for(const [id,list] of entries(r.controls===undefined?{}:r.controls,'controls')){
   if(!bridgeDevices.includes(id))fail(`controls names "${id}"; only ${bridgeDevices.join(', ')||'the devices in bridges'} have a bridge`);
   if(!Array.isArray(list)||list.length>40)fail(`controls.${id} must be a list of at most 40 services`);
   controls[id]=list.map((c,i)=>control(c,`controls.${id}[${i}]`));
   if(new Set(controls[id].map(c=>c.id)).size!==controls[id].length)fail(`controls.${id} lists an id twice`);
  }
- return deepFreeze({sockets:{...sockets},hosts,controls,page:page(r.page??{},byId,'page'),bridges:{...bridges},bridgeDevices});
+ return deepFreeze({sockets:{...sockets},hosts,controls,page:page(r.page===undefined?{}:r.page,byId,'page'),bridges:{...bridges},bridgeDevices});
 }
 export const hostDefinition=h=>({id:h.id,name:h.name,ip:h.ip,role:h.role,picture:h.picture,hardware:{...h.hardware},...(h.runtimes?{runtimes:[...h.runtimes]}:{}),...(h.actions?{actions:[...h.actions]}:{})});
 export function compiledProfile(profile){
@@ -143,9 +143,12 @@ export function computeAgentConfig(config,device){
  return {hostId:device,profile:h?.agent?structuredClone(h.agent):null,controls:(config.controls[device]||[]).map(c=>({...c}))};
 }
 export function readComputeAgentConfig(raw){
- keys(raw,['hostId','profile','controls'],'(agent configuration)');
+ keys(raw,['$comment','plugin','agent','device','hostId','profile','controls'],'(agent configuration)');
+ for(const [field,expected] of [['plugin','macos-runtimes'],['agent','bridge'],['device',raw.hostId]])if(raw[field]!==undefined&&raw[field]!==expected)fail(`(agent configuration).${field} must be ${expected}`);
+ if(raw.$comment!==undefined)text(raw.$comment,1000,'(agent configuration).$comment');
  if(typeof raw.hostId!=='string'||!DEVICE.test(raw.hostId))fail('(agent configuration).hostId must be a device id');
  if(!Array.isArray(raw.controls)||raw.controls.length>40)fail('(agent configuration).controls must be a list of at most 40 services');
  const controls=raw.controls.map((c,i)=>control(c,`(agent configuration).controls[${i}]`));
+ if(new Set(controls.map(c=>c.id)).size!==controls.length)fail('(agent configuration).controls lists an id twice');
  return deepFreeze({hostId:raw.hostId,profile:raw.profile===null?null:compiledProfile(agent(raw.profile,'(agent configuration).profile')),controls});
 }
