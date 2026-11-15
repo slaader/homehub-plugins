@@ -1,5 +1,5 @@
 export function controlAction(input,definitions=[]){
- if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).some(k=>!['id','action','requestId'].includes(k))||!definitions.some(s=>s.id===input.id)||!['start','stop','restart'].includes(input.action)||typeof input.requestId!=='string'||!/^[a-f0-9-]{36}$/.test(input.requestId))throw new Error('invalid');
+ if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).some(k=>!['id','action','requestId'].includes(k))||!definitions.some(s=>s.id===input.id)||!['start','stop','restart'].includes(input.action)||typeof input.requestId!=='string'||!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(input.requestId))throw new Error('invalid');
  return {id:input.id,action:input.action,requestId:input.requestId};
 }
 export function controlState(raw,definitions=[]){

@@ -122,7 +122,7 @@ export function computeAction(input,hosts=null){
  if(!(hosts?bridged(hosts,input.host):typeof input.host==='string'&&DEVICE.test(input.host))||!computeActions.includes(input.action)||typeof input.requestId!=='string'||!uuid.test(input.requestId))throw new Error('invalid');
  const allowed=hosts?.find(h=>h.id===input.host)?.actions;if(allowed&&!allowed.includes(input.action))throw new Error('invalid');
  const needsModel=['unload-model','warm'].includes(input.action);
- if(needsModel?(typeof input.model!=='string'||!/^[A-Za-z0-9._:-]{1,120}$/.test(input.model)):input.model!==undefined)throw new Error('invalid');
+ if(needsModel?(typeof input.model!=='string'||(!/^[A-Za-z0-9._:-]{1,120}$/.test(input.model)||['.','..'].includes(input.model))):input.model!==undefined)throw new Error('invalid');
  return needsModel?{host:input.host,action:input.action,model:input.model,requestId:input.requestId}:{host:input.host,action:input.action,requestId:input.requestId};
 }
 export function historyQuery(input,devices=[]){const host=input?.host??'all',range=input?.range??'30d';if(!['all',...devices].includes(host)||!ranges[range]||Object.keys(object(input)).some(k=>!['host','range'].includes(k)))throw new Error('invalid');return {host,range};}
